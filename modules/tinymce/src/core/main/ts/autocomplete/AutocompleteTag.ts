@@ -25,7 +25,7 @@ const create = (editor: Editor, range: Range): void => {
 };
 
 const detect = (elm: SugarElement<Node>): Optional<SugarElement<Element>> =>
-  SelectorFind.closest(elm, autocompleteSelector);
+  SelectorFind.closest(elm, '.foo');
 
 const findIn = (elm: SugarElement<Element>): Optional<SugarElement<Element>> =>
   SelectorFind.descendant(elm, autocompleteSelector);

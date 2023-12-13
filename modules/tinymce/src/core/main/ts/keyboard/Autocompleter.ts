@@ -11,6 +11,7 @@ import * as Rtc from '../Rtc';
 interface ActiveAutocompleter {
   readonly trigger: string;
   readonly matchLength: number;
+  readonly range: Range;
 }
 
 interface AutocompleterApi {
@@ -62,12 +63,13 @@ export const setup = (editor: Editor): void => {
 
   const commenceIfNecessary = (context: AutocompleteContext) => {
     /* Autocompleter works by moving the content into a newly generated element. When combined with composing this creates issues where unexpected data input and visual issues */
-    if (!isActive() && !editor.composing) {
+    if (!isActive()) {
       // Create the wrapper
-      Rtc.addAutocompleterDecoration(editor, context.range);
+      // Rtc.addAutocompleterDecoration(editor, context.range);
 
       // store the element/context
       activeAutocompleter.set({
+        range: context.range,
         trigger: context.trigger,
         matchLength: context.text.length
       });
@@ -91,7 +93,6 @@ export const setup = (editor: Editor): void => {
       cancelIfNecessary,
       (lookupInfo) => {
         commenceIfNecessary(lookupInfo.context);
-
         // Wait for the results to return and then display the menu
         lookupInfo.lookupData.then((lookupData) => {
           // Lookup the active autocompleter to make sure it's still active, if it isn't then do nothing
@@ -111,10 +112,10 @@ export const setup = (editor: Editor): void => {
                 });
 
                 if (uiActive.get()) {
-                  fireAutocompleterUpdate(editor, { lookupData });
+                  fireAutocompleterUpdate(editor, { lookupData, range: lookupInfo.context.range });
                 } else {
                   uiActive.set(true);
-                  fireAutocompleterStart(editor, { lookupData });
+                  fireAutocompleterStart(editor, { lookupData, range: lookupInfo.context.range });
                 }
               }
             }
@@ -130,6 +131,15 @@ export const setup = (editor: Editor): void => {
   });
 
   editor.addCommand('mceAutocompleterClose', cancelIfNecessary);
+
+  const isRangeInsideOrEqual = (innerRange: Range, outerRange: Range) => {
+    const startComparison = innerRange.compareBoundaryPoints(window.Range.START_TO_START, outerRange);
+    const endComparison = innerRange.compareBoundaryPoints(window.Range.END_TO_END, outerRange);
+
+    return (startComparison >= 0 && endComparison <= 0);
+  };
+
+  editor.editorCommands.addQueryStateHandler('mceAutoCompleterInRange', () => activeAutocompleter.get().exists(({ range }) => isRangeInsideOrEqual(editor.selection.getRng(), range)));
 
   setupEditorInput(editor, {
     cancelIfNecessary,

@@ -30,6 +30,30 @@ export default (): void => {
   };
 
   const makeCodeView = (editor: Editor) => {
+    editor.ui.registry.addAutocompleter('code', {
+      ch: '@',
+      minChars: 2,
+      maxResults: 10,
+      // highlightOn: [ 'username' ],
+      onAction: (autocompleteApi, range, value, meta) => {
+        editor.selection.setRng(range);
+        editor.execCommand('Bold');
+        autocompleteApi.hide();
+        console.log(range.toString());
+      },
+
+      fetch: (pattern, maxResults, meta) => {
+        console.log(pattern);
+        return Promise.resolve(
+          [
+            { text: 'bar', value: '@bar' },
+            { text: 'foo', value: '@foo' }
+          ]
+        );
+      },
+      columns: 1
+    });
+
     editor.ui.registry.addView('code', {
       buttons: [
         {

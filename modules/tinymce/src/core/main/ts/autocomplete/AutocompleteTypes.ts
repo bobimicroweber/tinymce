@@ -10,6 +10,7 @@ export interface AutocompleteLookupData {
 
 export interface AutocompleterEventArgs {
   readonly lookupData: AutocompleteLookupData[];
+  readonly range: Range;
 }
 
 export interface AutocompleterReloadArgs {

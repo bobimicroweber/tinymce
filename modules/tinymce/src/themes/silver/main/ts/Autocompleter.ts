@@ -1,26 +1,24 @@
 import { AddEventsBehaviour, AlloyEvents, Behaviour, GuiFactory, Highlighting, InlineView, ItemTypes, SystemEvents } from '@ephox/alloy';
 import { InlineContent } from '@ephox/bridge';
 import { Arr, Cell, Id, Optional } from '@ephox/katamari';
-import { Attribute, Css, Replication, SelectorFind, SugarElement } from '@ephox/sugar';
+import { Attribute, Css, Replication, SelectorFind, SimRange, SugarElement } from '@ephox/sugar';
 
-import DOMUtils from 'tinymce/core/api/dom/DOMUtils';
 import Editor from 'tinymce/core/api/Editor';
 import { AutocompleteLookupData } from 'tinymce/core/autocomplete/AutocompleteTypes';
 
 import { AutocompleterEditorEvents, AutocompleterUiApi } from './autocomplete/AutocompleteEditorEvents';
-import * as AutocompleteTagReader from './autocomplete/AutocompleteTagReader';
 import { UiFactoryBackstageShared } from './backstage/Backstage';
 import ItemResponse from './ui/menus/item/ItemResponse';
 import { createPartialMenuWithAlloyItems } from './ui/menus/menu/MenuUtils';
 import { createAutocompleteItems, createInlineMenuFrom, FocusMode } from './ui/menus/menu/SingleMenu';
 
-const getAutocompleterRange = (dom: DOMUtils, initRange: Range): Optional<Range> => {
-  return AutocompleteTagReader.detect(SugarElement.fromDom(initRange.startContainer)).map((elm) => {
-    const range = dom.createRng();
-    range.selectNode(elm.dom);
-    return range;
-  });
-};
+// const getAutocompleterRange = (dom: DOMUtils, initRange: Range): Optional<Range> => {
+//   return AutocompleteTagReader.detect(SugarElement.fromDom(initRange.startContainer)).map((elm) => {
+//     const range = dom.createRng();
+//     range.selectNode(elm.dom);
+//     return range;
+//   });
+// };
 
 const register = (editor: Editor, sharedBackstage: UiFactoryBackstageShared): void => {
   const autocompleterId = Id.generate('autocompleter');
@@ -77,8 +75,14 @@ const register = (editor: Editor, sharedBackstage: UiFactoryBackstageShared): vo
   });
 
   const cancelIfNecessary = () => editor.execCommand('mceAutocompleterClose');
+  const isRangeInsideOrEqual = (innerRange: Range, outerRange: Range) => {
+    const startComparison = innerRange.compareBoundaryPoints(window.Range.START_TO_START, outerRange);
+    const endComparison = innerRange.compareBoundaryPoints(window.Range.END_TO_END, outerRange);
 
-  const getCombinedItems = (matches: AutocompleteLookupData[]): ItemTypes.ItemSpec[] => {
+    return (startComparison >= 0 && endComparison <= 0);
+  };
+
+  const getCombinedItems = (matches: AutocompleteLookupData[], range: Range): ItemTypes.ItemSpec[] => {
     const columns = Arr.findMap(matches, (m) => Optional.from(m.columns)).getOr(1);
 
     return Arr.bind(matches, (match) => {
@@ -89,18 +93,20 @@ const register = (editor: Editor, sharedBackstage: UiFactoryBackstageShared): vo
         match.matchText,
         (itemValue, itemMeta) => {
           const nr = editor.selection.getRng();
-          getAutocompleterRange(editor.dom, nr).each((range) => {
-            const autocompleterApi: InlineContent.AutocompleterInstanceApi = {
-              hide: () => cancelIfNecessary(),
-              reload: (fetchOptions: Record<string, any>) => {
-                hideIfNecessary();
-                editor.execCommand('mceAutocompleterReload', false, { fetchOptions });
-              }
-            };
-            processingAction.set(true);
-            match.onAction(autocompleterApi, range, itemValue, itemMeta);
-            processingAction.set(false);
-          });
+          if (!isRangeInsideOrEqual(nr, range)) {
+            return;
+          }
+
+          const autocompleterApi: InlineContent.AutocompleterInstanceApi = {
+            hide: () => cancelIfNecessary(),
+            reload: (fetchOptions: Record<string, any>) => {
+              hideIfNecessary();
+              editor.execCommand('mceAutocompleterReload', false, { fetchOptions });
+            }
+          };
+          processingAction.set(true);
+          match.onAction(autocompleterApi, range, itemValue, itemMeta);
+          processingAction.set(false);
         },
         columns,
         ItemResponse.BUBBLE_TO_SANDBOX,
@@ -110,44 +116,42 @@ const register = (editor: Editor, sharedBackstage: UiFactoryBackstageShared): vo
     });
   };
 
-  const display = (lookupData: AutocompleteLookupData[], items: ItemTypes.ItemSpec[]) => {
-    AutocompleteTagReader.findIn(SugarElement.fromDom(editor.getBody())).each((element) => {
-      // Display the autocompleter menu
-      const columns: InlineContent.ColumnTypes = Arr.findMap(lookupData, (ld) => Optional.from(ld.columns)).getOr(1);
-      InlineView.showMenuAt(
-        autocompleter,
-        {
-          anchor: {
-            type: 'node',
-            root: SugarElement.fromDom(editor.getBody()),
-            node: Optional.from(element)
-          }
-        },
-        createInlineMenuFrom(
-          createPartialMenuWithAlloyItems(
-            'autocompleter-value',
-            true,
-            items,
-            columns,
-            { menuType: 'normal' }
-          ),
+  const display = (lookupData: AutocompleteLookupData[], items: ItemTypes.ItemSpec[], range: Range) => {
+    // Display the autocompleter menu
+    const columns: InlineContent.ColumnTypes = Arr.findMap(lookupData, (ld) => Optional.from(ld.columns)).getOr(1);
+    InlineView.showMenuAt(
+      autocompleter,
+      {
+        anchor: {
+          type: 'selection',
+          getSelection: () => Optional.some(SimRange.create(SugarElement.fromDom(range.startContainer), range.startOffset, SugarElement.fromDom(range.endContainer), range.endOffset)),
+          root: SugarElement.fromDom(editor.getBody()),
+        }
+      },
+      createInlineMenuFrom(
+        createPartialMenuWithAlloyItems(
+          'autocompleter-value',
+          true,
+          items,
           columns,
-          FocusMode.ContentFocus,
-          // Use the constant.
-          'normal'
-        )
-      );
-    });
+          { menuType: 'normal' }
+        ),
+        columns,
+        FocusMode.ContentFocus,
+        // Use the constant.
+        'normal'
+      )
+    );
 
     getMenu().each(Highlighting.highlightFirst);
   };
 
-  const updateDisplay = (lookupData: AutocompleteLookupData[]) => {
-    const combinedItems = getCombinedItems(lookupData);
+  const updateDisplay = (lookupData: AutocompleteLookupData[], range: Range) => {
+    const combinedItems = getCombinedItems(lookupData, range);
 
     // Open the autocompleter if there are items to show
     if (combinedItems.length > 0) {
-      display(lookupData, combinedItems);
+      display(lookupData, combinedItems, range);
       Attribute.set(SugarElement.fromDom(editor.getBody()), 'aria-owns', autocompleterId);
       if (!editor.inline) {
         cloneAutocompleterToEditorDoc();
@@ -186,13 +190,13 @@ const register = (editor: Editor, sharedBackstage: UiFactoryBackstageShared): vo
     });
   };
 
-  editor.on('AutocompleterStart', ({ lookupData }) => {
+  editor.on('AutocompleterStart', ({ lookupData, range }) => {
     activeState.set(true);
     processingAction.set(false);
-    updateDisplay(lookupData);
+    updateDisplay(lookupData, range);
   });
 
-  editor.on('AutocompleterUpdate', ({ lookupData }) => updateDisplay(lookupData));
+  editor.on('AutocompleterUpdate', ({ lookupData, range }) => updateDisplay(lookupData, range));
 
   editor.on('AutocompleterEnd', () => {
     // Hide the menu and reset
