@@ -1,7 +1,7 @@
 import { Cell, Optional, Singleton, Throttler, Thunk, Type } from '@ephox/katamari';
 
 import Editor from '../api/Editor';
-import { fireAutocompleterEnd, fireAutocompleterStart, fireAutocompleterUpdate } from '../api/Events';
+import * as Events from '../api/Events';
 import { AutocompleteContext, getContext } from '../autocomplete/AutocompleteContext';
 import { AutocompleteLookupInfo, lookup, lookupWithContext } from '../autocomplete/AutocompleteLookup';
 import * as Autocompleters from '../autocomplete/Autocompleters';
@@ -22,12 +22,7 @@ interface AutocompleterApi {
 const setupEditorInput = (editor: Editor, api: AutocompleterApi) => {
   const update = Throttler.last(api.load, 50);
 
-  editor.on('keypress compositionend', (e) => {
-    // IE will pass the escape key here, so just don't do anything on escape
-    if (e.which === 27) {
-      return;
-    }
-
+  editor.on('input', () => {
     update.throttle();
   });
 
@@ -39,9 +34,18 @@ const setupEditorInput = (editor: Editor, api: AutocompleterApi) => {
       update.throttle();
     // Pressing <esc> closes the autocompleter
     } else if (keyCode === 27) {
+      update.cancel();
       api.cancelIfNecessary();
     }
   });
+
+  editor.on('keydown', ({ keyCode }) => {
+    // Arrow up and down keys needs to cancel the update since while composing arrow up or down will end the compose and issue a input event
+    // that causes the list to update and then the focus moves up to the first item in the auto completer list.
+    if (keyCode === 38 || keyCode === 40) {
+      update.cancel();
+    }
+  }, true);
 
   editor.on('remove', update.cancel);
 };
@@ -55,7 +59,7 @@ export const setup = (editor: Editor): void => {
   const cancelIfNecessary = () => {
     if (isActive()) {
       Rtc.removeAutocompleterDecoration(editor);
-      fireAutocompleterEnd(editor);
+      Events.fireAutocompleterEnd(editor);
       uiActive.set(false);
       activeAutocompleter.clear();
     }
@@ -98,7 +102,6 @@ export const setup = (editor: Editor): void => {
           // Lookup the active autocompleter to make sure it's still active, if it isn't then do nothing
           activeAutocompleter.get().map((ac) => {
             const context = lookupInfo.context;
-
             // Ensure the active autocompleter trigger matches, as the old one may have closed
             // and a new one may have opened. If it doesn't match, then do nothing.
             if (ac.trigger === context.trigger) {
@@ -112,10 +115,10 @@ export const setup = (editor: Editor): void => {
                 });
 
                 if (uiActive.get()) {
-                  fireAutocompleterUpdate(editor, { lookupData, range: lookupInfo.context.range });
+                  Events.fireAutocompleterUpdate(editor, { lookupData, range: lookupInfo.context.range });
                 } else {
                   uiActive.set(true);
-                  fireAutocompleterStart(editor, { lookupData, range: lookupInfo.context.range });
+                  Events.fireAutocompleterStart(editor, { lookupData, range: lookupInfo.context.range });
                 }
               }
             }
@@ -136,14 +139,12 @@ export const setup = (editor: Editor): void => {
     const startComparison = innerRange.compareBoundaryPoints(window.Range.START_TO_START, outerRange);
     const endComparison = innerRange.compareBoundaryPoints(window.Range.END_TO_END, outerRange);
 
-    return (startComparison >= 0 && endComparison <= 0);
+    return startComparison >= 0 && endComparison <= 0;
   };
 
   editor.editorCommands.addQueryStateHandler('mceAutoCompleterInRange', () => activeAutocompleter.get().exists(({ trigger }) => {
     const selRange = editor.selection.getRng();
-    return getContext(editor.dom, selRange, trigger).exists(({ range }) => {
-      return isRangeInsideOrEqual(selRange, range);
-    });
+    return getContext(editor.dom, selRange, trigger).exists(({ range }) => isRangeInsideOrEqual(selRange, range ));
   }));
 
   setupEditorInput(editor, {

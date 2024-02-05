@@ -1,9 +1,7 @@
 import { Optional, Strings } from '@ephox/katamari';
-import { SugarElement } from '@ephox/sugar';
 
 import * as TextSearch from '../alien/TextSearch';
 import DOMUtils from '../api/dom/DOMUtils';
-import * as AutocompleteTag from './AutocompleteTag';
 import { getText, isValidTextRange, isWhitespace } from './AutocompleteUtils';
 
 export interface AutocompleteContext {
@@ -72,15 +70,7 @@ const findStart = (dom: DOMUtils, initRange: Range, trigger: string, minChars: n
 };
 
 const getContext = (dom: DOMUtils, initRange: Range, trigger: string, minChars: number = 0): Optional<AutocompleteContext> =>
-  AutocompleteTag.detect(SugarElement.fromDom(initRange.startContainer)).fold(
-    () => findStart(dom, initRange, trigger, minChars),
-    (elm) => {
-      const range = dom.createRng();
-      range.selectNode(elm.dom);
-      const text = getText(range);
-      return Optional.some({ range, text: stripTrigger(text, trigger), trigger });
-    }
-  );
+  findStart(dom, initRange, trigger, minChars);
 
 export {
   findTrigger, // Exposed for testing.

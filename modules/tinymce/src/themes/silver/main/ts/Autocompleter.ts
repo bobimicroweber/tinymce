@@ -12,13 +12,14 @@ import ItemResponse from './ui/menus/item/ItemResponse';
 import { createPartialMenuWithAlloyItems } from './ui/menus/menu/MenuUtils';
 import { createAutocompleteItems, createInlineMenuFrom, FocusMode } from './ui/menus/menu/SingleMenu';
 
-// const getAutocompleterRange = (dom: DOMUtils, initRange: Range): Optional<Range> => {
-//   return AutocompleteTagReader.detect(SugarElement.fromDom(initRange.startContainer)).map((elm) => {
-//     const range = dom.createRng();
-//     range.selectNode(elm.dom);
-//     return range;
-//   });
-// };
+const rangeToSimRange = (r: Range) => SimRange.create(SugarElement.fromDom(r.startContainer), r.startOffset, SugarElement.fromDom(r.endContainer), r.endOffset);
+
+const simRangeToRange = (r: SimRange) => {
+  const rng = new window.Range();
+  rng.setStart(r.start.dom, r.soffset);
+  rng.setEnd(r.finish.dom, r.foffset);
+  return rng;
+};
 
 const register = (editor: Editor, sharedBackstage: UiFactoryBackstageShared): void => {
   const autocompleterId = Id.generate('autocompleter');
@@ -75,14 +76,8 @@ const register = (editor: Editor, sharedBackstage: UiFactoryBackstageShared): vo
   });
 
   const cancelIfNecessary = () => editor.execCommand('mceAutocompleterClose');
-  const isRangeInsideOrEqual = (innerRange: Range, outerRange: Range) => {
-    const startComparison = innerRange.compareBoundaryPoints(window.Range.START_TO_START, outerRange);
-    const endComparison = innerRange.compareBoundaryPoints(window.Range.END_TO_END, outerRange);
 
-    return (startComparison >= 0 && endComparison <= 0);
-  };
-
-  const getCombinedItems = (matches: AutocompleteLookupData[], range: Range): ItemTypes.ItemSpec[] => {
+  const getCombinedItems = (matches: AutocompleteLookupData[], range: SimRange): ItemTypes.ItemSpec[] => {
     const columns = Arr.findMap(matches, (m) => Optional.from(m.columns)).getOr(1);
 
     return Arr.bind(matches, (match) => {
@@ -92,11 +87,6 @@ const register = (editor: Editor, sharedBackstage: UiFactoryBackstageShared): vo
         choices,
         match.matchText,
         (itemValue, itemMeta) => {
-          const nr = editor.selection.getRng();
-          if (!isRangeInsideOrEqual(nr, range)) {
-            return;
-          }
-
           const autocompleterApi: InlineContent.AutocompleterInstanceApi = {
             hide: () => cancelIfNecessary(),
             reload: (fetchOptions: Record<string, any>) => {
@@ -105,7 +95,7 @@ const register = (editor: Editor, sharedBackstage: UiFactoryBackstageShared): vo
             }
           };
           processingAction.set(true);
-          match.onAction(autocompleterApi, range, itemValue, itemMeta);
+          match.onAction(autocompleterApi, simRangeToRange(range), itemValue, itemMeta);
           processingAction.set(false);
         },
         columns,
@@ -116,7 +106,7 @@ const register = (editor: Editor, sharedBackstage: UiFactoryBackstageShared): vo
     });
   };
 
-  const display = (lookupData: AutocompleteLookupData[], items: ItemTypes.ItemSpec[], range: Range) => {
+  const display = (lookupData: AutocompleteLookupData[], items: ItemTypes.ItemSpec[], range: SimRange) => {
     // Display the autocompleter menu
     const columns: InlineContent.ColumnTypes = Arr.findMap(lookupData, (ld) => Optional.from(ld.columns)).getOr(1);
     InlineView.showMenuAt(
@@ -124,7 +114,7 @@ const register = (editor: Editor, sharedBackstage: UiFactoryBackstageShared): vo
       {
         anchor: {
           type: 'selection',
-          getSelection: () => Optional.some(SimRange.create(SugarElement.fromDom(range.startContainer), range.startOffset, SugarElement.fromDom(range.endContainer), range.endOffset)),
+          getSelection: () => Optional.some(range),
           root: SugarElement.fromDom(editor.getBody()),
         }
       },
@@ -146,7 +136,7 @@ const register = (editor: Editor, sharedBackstage: UiFactoryBackstageShared): vo
     getMenu().each(Highlighting.highlightFirst);
   };
 
-  const updateDisplay = (lookupData: AutocompleteLookupData[], range: Range) => {
+  const updateDisplay = (lookupData: AutocompleteLookupData[], range: SimRange) => {
     const combinedItems = getCombinedItems(lookupData, range);
 
     // Open the autocompleter if there are items to show
@@ -193,10 +183,10 @@ const register = (editor: Editor, sharedBackstage: UiFactoryBackstageShared): vo
   editor.on('AutocompleterStart', ({ lookupData, range }) => {
     activeState.set(true);
     processingAction.set(false);
-    updateDisplay(lookupData, range);
+    updateDisplay(lookupData, rangeToSimRange(range));
   });
 
-  editor.on('AutocompleterUpdate', ({ lookupData, range }) => updateDisplay(lookupData, range));
+  editor.on('AutocompleterUpdate', ({ lookupData, range }) => updateDisplay(lookupData, rangeToSimRange(range)));
 
   editor.on('AutocompleterEnd', () => {
     // Hide the menu and reset
