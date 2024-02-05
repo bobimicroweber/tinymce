@@ -35,14 +35,14 @@ export default (): void => {
       minChars: 2,
       maxResults: 10,
       // highlightOn: [ 'username' ],
-      onAction: (autocompleteApi, range, value, meta) => {
+      onAction: (autocompleteApi, range, _value, _meta) => {
         editor.selection.setRng(range);
         editor.execCommand('Bold');
         autocompleteApi.hide();
         console.log(range.toString());
       },
 
-      fetch: (pattern, maxResults, meta) => {
+      fetch: (pattern, _maxResults, _meta) => {
         console.log(pattern);
         return Promise.resolve(
           [

@@ -139,7 +139,12 @@ export const setup = (editor: Editor): void => {
     return (startComparison >= 0 && endComparison <= 0);
   };
 
-  editor.editorCommands.addQueryStateHandler('mceAutoCompleterInRange', () => activeAutocompleter.get().exists(({ range }) => isRangeInsideOrEqual(editor.selection.getRng(), range)));
+  editor.editorCommands.addQueryStateHandler('mceAutoCompleterInRange', () => activeAutocompleter.get().exists(({ trigger }) => {
+    const selRange = editor.selection.getRng();
+    return getContext(editor.dom, selRange, trigger).exists(({ range }) => {
+      return isRangeInsideOrEqual(selRange, range);
+    });
+  }));
 
   setupEditorInput(editor, {
     cancelIfNecessary,

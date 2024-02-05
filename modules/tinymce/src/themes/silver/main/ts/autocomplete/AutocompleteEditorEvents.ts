@@ -68,7 +68,6 @@ const setup = (api: AutocompleterUiApi, editor: Editor): void => {
   editor.on('NodeChange', (_e) => {
     // Close if active, not in the middle of an onAction callback and we're no longer inside the autocompleter span
     if (api.isActive() && !api.isProcessingAction() && !editor.queryCommandState('mceAutoCompleterInRange')) {
-      console.log('Nodechange cancel');
       api.cancelIfNecessary();
     }
   });
