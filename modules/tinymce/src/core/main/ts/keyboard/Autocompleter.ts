@@ -88,7 +88,7 @@ export const setup = (editor: Editor): void => {
 
   const doLookup = (fetchOptions: Record<string, any> | undefined): Optional<AutocompleteLookupInfo> =>
     activeAutocompleter.get().map(
-      (ac) => getContext(editor.dom, editor.selection.getRng(), ac.trigger)
+      (ac) => getContext(editor.dom, editor.selection.getRng(), ac.trigger, true)
         .bind((newContext) => lookupWithContext(editor, getAutocompleters, newContext, fetchOptions))
     ).getOrThunk(() => lookup(editor, getAutocompleters));
 
@@ -128,12 +128,27 @@ export const setup = (editor: Editor): void => {
     );
   };
 
+  const getActiveRange = () => {
+    return activeAutocompleter.get().bind(({ trigger }) => {
+      const selRange = editor.selection.getRng();
+      return getContext(editor.dom, selRange, trigger, uiActive.get())
+        .filter(({ range }) => isRangeInsideOrEqual(selRange, range ))
+        .map(({ range }) => range);
+    });
+  };
+
   editor.addCommand('mceAutocompleterReload', (_ui, value: AutocompleterReloadArgs) => {
     const fetchOptions = Type.isObject(value) ? value.fetchOptions : {};
     load(fetchOptions);
   });
 
   editor.addCommand('mceAutocompleterClose', cancelIfNecessary);
+
+  editor.addCommand('mceAutocompleterRefreshActiveRange', () => {
+    getActiveRange().each((range) => {
+      Events.fireAutocompleterUpdateActiveRange(editor, { range });
+    });
+  });
 
   const isRangeInsideOrEqual = (innerRange: Range, outerRange: Range) => {
     const startComparison = innerRange.compareBoundaryPoints(window.Range.START_TO_START, outerRange);
@@ -142,10 +157,7 @@ export const setup = (editor: Editor): void => {
     return startComparison >= 0 && endComparison <= 0;
   };
 
-  editor.editorCommands.addQueryStateHandler('mceAutoCompleterInRange', () => activeAutocompleter.get().exists(({ trigger }) => {
-    const selRange = editor.selection.getRng();
-    return getContext(editor.dom, selRange, trigger).exists(({ range }) => isRangeInsideOrEqual(selRange, range ));
-  }));
+  editor.editorCommands.addQueryStateHandler('mceAutoCompleterInRange', () => getActiveRange().isSome());
 
   setupEditorInput(editor, {
     cancelIfNecessary,

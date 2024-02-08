@@ -13,6 +13,10 @@ export interface AutocompleterEventArgs {
   readonly range: Range;
 }
 
+export interface AutocompleterUpdateActiveRangeEventArgs {
+  readonly range: Range;
+}
+
 export interface AutocompleterReloadArgs {
   readonly fetchOptions?: Record<string, any>;
 }
