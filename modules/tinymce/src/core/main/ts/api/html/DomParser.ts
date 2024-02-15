@@ -1,19 +1,17 @@
-import { Arr, Fun, Obj, Type } from '@ephox/katamari';
+import { Obj, Type } from '@ephox/katamari';
 
 import * as TransparentElements from '../../content/TransparentElements';
 import * as NodeType from '../../dom/NodeType';
 import * as FilterNode from '../../html/FilterNode';
 import * as FilterRegistry from '../../html/FilterRegistry';
-import * as InvalidNodes from '../../html/InvalidNodes';
 import * as LegacyFilter from '../../html/LegacyFilter';
 import * as Namespace from '../../html/Namespace';
 import * as ParserFilters from '../../html/ParserFilters';
-import { isEmpty, isLineBreakNode, isPaddedWithNbsp, paddEmptyNode } from '../../html/ParserUtils';
 import { getSanitizer, internalElementAttr } from '../../html/Sanitization';
 import { BlobCache } from '../file/BlobCache';
 import Tools from '../util/Tools';
 import AstNode from './Node';
-import Schema, { SchemaMap, SchemaRegExpMap, getTextRootBlockElements } from './Schema';
+import Schema, { SchemaMap, SchemaRegExpMap } from './Schema';
 
 /**
  * @summary
@@ -83,7 +81,7 @@ interface DomParser {
   parse: (html: string, args?: ParserArgs) => AstNode;
 }
 
-type WalkerCallback = (node: AstNode) => void;
+//type WalkerCallback = (node: AstNode) => void;
 
 const transferChildren = (parent: AstNode, nativeParent: Node, specialElements: SchemaRegExpMap, nsSanitizer: (el: Element) => void) => {
   const parentName = parent.name;
@@ -123,139 +121,139 @@ const transferChildren = (parent: AstNode, nativeParent: Node, specialElements: 
     parent.append(child);
   }
 };
-
-const walkTree = (root: AstNode, preprocessors: WalkerCallback[], postprocessors: WalkerCallback[]) => {
-  const traverseOrder: AstNode[] = [];
-
-  for (let node: AstNode | null | undefined = root, lastNode = node; node; lastNode = node, node = node.walk()) {
-    const tempNode = node;
-    Arr.each(preprocessors, (preprocess) => preprocess(tempNode));
-
-    if (Type.isNullable(tempNode.parent) && tempNode !== root) {
-      // The node has been detached, so rewind a little and don't add it to our traversal
-      node = lastNode;
-    } else {
-      traverseOrder.push(tempNode);
-    }
-  }
-
-  for (let i = traverseOrder.length - 1; i >= 0; i--) {
-    const node = traverseOrder[i];
-    Arr.each(postprocessors, (postprocess) => postprocess(node));
-  }
-};
+//
+// const walkTree = (root: AstNode, preprocessors: WalkerCallback[], postprocessors: WalkerCallback[]) => {
+//   const traverseOrder: AstNode[] = [];
+//
+//   for (let node: AstNode | null | undefined = root, lastNode = node; node; lastNode = node, node = node.walk()) {
+//     const tempNode = node;
+//     Arr.each(preprocessors, (preprocess) => preprocess(tempNode));
+//
+//     if (Type.isNullable(tempNode.parent) && tempNode !== root) {
+//       // The node has been detached, so rewind a little and don't add it to our traversal
+//       node = lastNode;
+//     } else {
+//       traverseOrder.push(tempNode);
+//     }
+//   }
+//
+//   for (let i = traverseOrder.length - 1; i >= 0; i--) {
+//     const node = traverseOrder[i];
+//     Arr.each(postprocessors, (postprocess) => postprocess(node));
+//   }
+// };
 
 // All the dom operations we want to perform, regardless of whether we're trying to properly validate things
 // e.g. removing excess whitespace
 // e.g. removing empty nodes (or padding them with <br>)
+// //
+// // Returns [ preprocess, postprocess ]
+// const whitespaceCleaner = (root: AstNode, schema: Schema, settings: DomParserSettings, args: ParserArgs): [WalkerCallback, WalkerCallback] => {
+//   const validate = settings.validate;
+//   const nonEmptyElements = schema.getNonEmptyElements();
+//   const whitespaceElements = schema.getWhitespaceElements();
+//   const blockElements: Record<string, string> = extend(makeMap('script,style,head,html,body,title,meta,param'), schema.getBlockElements());
+//   const textRootBlockElements = getTextRootBlockElements(schema);
+//   const allWhiteSpaceRegExp = /[ \t\r\n]+/g;
+//   const startWhiteSpaceRegExp = /^[ \t\r\n]+/;
+//   const endWhiteSpaceRegExp = /[ \t\r\n]+$/;
 //
-// Returns [ preprocess, postprocess ]
-const whitespaceCleaner = (root: AstNode, schema: Schema, settings: DomParserSettings, args: ParserArgs): [WalkerCallback, WalkerCallback] => {
-  const validate = settings.validate;
-  const nonEmptyElements = schema.getNonEmptyElements();
-  const whitespaceElements = schema.getWhitespaceElements();
-  const blockElements: Record<string, string> = extend(makeMap('script,style,head,html,body,title,meta,param'), schema.getBlockElements());
-  const textRootBlockElements = getTextRootBlockElements(schema);
-  const allWhiteSpaceRegExp = /[ \t\r\n]+/g;
-  const startWhiteSpaceRegExp = /^[ \t\r\n]+/;
-  const endWhiteSpaceRegExp = /[ \t\r\n]+$/;
-
-  const hasWhitespaceParent = (node: AstNode) => {
-    let tempNode = node.parent;
-    while (Type.isNonNullable(tempNode)) {
-      if (tempNode.name in whitespaceElements) {
-        return true;
-      } else {
-        tempNode = tempNode.parent;
-      }
-    }
-    return false;
-  };
-
-  const isTextRootBlockEmpty = (node: AstNode) => {
-    let tempNode: AstNode | null | undefined = node;
-    while (Type.isNonNullable(tempNode)) {
-      if (tempNode.name in textRootBlockElements) {
-        return isEmpty(schema, nonEmptyElements, whitespaceElements, tempNode);
-      } else {
-        tempNode = tempNode.parent;
-      }
-    }
-    return false;
-  };
-
-  const isBlock = (node: AstNode) =>
-    node.name in blockElements || TransparentElements.isTransparentAstBlock(schema, node) || (Namespace.isNonHtmlElementRootName(node.name) && node.parent === root);
-
-  const isAtEdgeOfBlock = (node: AstNode, start: boolean): boolean => {
-    const neighbour = start ? node.prev : node.next;
-    if (Type.isNonNullable(neighbour) || Type.isNullable(node.parent)) {
-      return false;
-    }
-
-    // Make sure our parent is actually a block, and also make sure it isn't a temporary "context" element
-    // that we're probably going to unwrap as soon as we insert this content into the editor
-    return isBlock(node.parent) && (node.parent !== root || args.isRootContent === true);
-  };
-
-  const preprocess = (node: AstNode) => {
-    if (node.type === 3) {
-      // Remove leading whitespace here, so that all whitespace in nodes to the left of us has already been fixed
-      if (!hasWhitespaceParent(node)) {
-        let text = node.value ?? '';
-        text = text.replace(allWhiteSpaceRegExp, ' ');
-
-        if (isLineBreakNode(node.prev, isBlock) || isAtEdgeOfBlock(node, true)) {
-          text = text.replace(startWhiteSpaceRegExp, '');
-        }
-
-        if (text.length === 0) {
-          node.remove();
-        } else {
-          node.value = text;
-        }
-      }
-    }
-  };
-
-  const postprocess = (node: AstNode) => {
-    if (node.type === 1) {
-      // Check for empty nodes here, because children will have been processed and (if necessary) emptied / removed already
-      const elementRule = schema.getElementRule(node.name);
-      if (validate && elementRule) {
-        const isNodeEmpty = isEmpty(schema, nonEmptyElements, whitespaceElements, node);
-
-        if (elementRule.paddInEmptyBlock && isNodeEmpty && isTextRootBlockEmpty(node)) {
-          paddEmptyNode(settings, args, isBlock, node);
-        } else if (elementRule.removeEmpty && isNodeEmpty) {
-          if (isBlock(node)) {
-            node.remove();
-          } else {
-            node.unwrap();
-          }
-        } else if (elementRule.paddEmpty && (isNodeEmpty || isPaddedWithNbsp(node))) {
-          paddEmptyNode(settings, args, isBlock, node);
-        }
-      }
-    } else if (node.type === 3) {
-      // Removing trailing whitespace here, so that all whitespace in nodes to the right of us has already been fixed
-      if (!hasWhitespaceParent(node)) {
-        let text = node.value ?? '';
-        if (node.next && isBlock(node.next) || isAtEdgeOfBlock(node, false)) {
-          text = text.replace(endWhiteSpaceRegExp, '');
-        }
-
-        if (text.length === 0) {
-          node.remove();
-        } else {
-          node.value = text;
-        }
-      }
-    }
-  };
-
-  return [ preprocess, postprocess ];
-};
+//   const hasWhitespaceParent = (node: AstNode) => {
+//     let tempNode = node.parent;
+//     while (Type.isNonNullable(tempNode)) {
+//       if (tempNode.name in whitespaceElements) {
+//         return true;
+//       } else {
+//         tempNode = tempNode.parent;
+//       }
+//     }
+//     return false;
+//   };
+//
+//   const isTextRootBlockEmpty = (node: AstNode) => {
+//     let tempNode: AstNode | null | undefined = node;
+//     while (Type.isNonNullable(tempNode)) {
+//       if (tempNode.name in textRootBlockElements) {
+//         return isEmpty(schema, nonEmptyElements, whitespaceElements, tempNode);
+//       } else {
+//         tempNode = tempNode.parent;
+//       }
+//     }
+//     return false;
+//   };
+//
+//   const isBlock = (node: AstNode) =>
+//     node.name in blockElements || TransparentElements.isTransparentAstBlock(schema, node) || (Namespace.isNonHtmlElementRootName(node.name) && node.parent === root);
+//
+//   const isAtEdgeOfBlock = (node: AstNode, start: boolean): boolean => {
+//     const neighbour = start ? node.prev : node.next;
+//     if (Type.isNonNullable(neighbour) || Type.isNullable(node.parent)) {
+//       return false;
+//     }
+//
+//     // Make sure our parent is actually a block, and also make sure it isn't a temporary "context" element
+//     // that we're probably going to unwrap as soon as we insert this content into the editor
+//     return isBlock(node.parent) && (node.parent !== root || args.isRootContent === true);
+//   };
+//
+//   const preprocess = (node: AstNode) => {
+//     if (node.type === 3) {
+//       // Remove leading whitespace here, so that all whitespace in nodes to the left of us has already been fixed
+//       if (!hasWhitespaceParent(node)) {
+//         let text = node.value ?? '';
+//         text = text.replace(allWhiteSpaceRegExp, ' ');
+//
+//         if (isLineBreakNode(node.prev, isBlock) || isAtEdgeOfBlock(node, true)) {
+//           text = text.replace(startWhiteSpaceRegExp, '');
+//         }
+//
+//         if (text.length === 0) {
+//           node.remove();
+//         } else {
+//           node.value = text;
+//         }
+//       }
+//     }
+//   };
+//
+//   const postprocess = (node: AstNode) => {
+//     if (node.type === 1) {
+//       // Check for empty nodes here, because children will have been processed and (if necessary) emptied / removed already
+//       const elementRule = schema.getElementRule(node.name);
+//       if (validate && elementRule) {
+//         const isNodeEmpty = isEmpty(schema, nonEmptyElements, whitespaceElements, node);
+//
+//         if (elementRule.paddInEmptyBlock && isNodeEmpty && isTextRootBlockEmpty(node)) {
+//           paddEmptyNode(settings, args, isBlock, node);
+//         } else if (elementRule.removeEmpty && isNodeEmpty) {
+//           if (isBlock(node)) {
+//             node.remove();
+//           } else {
+//             node.unwrap();
+//           }
+//         } else if (elementRule.paddEmpty && (isNodeEmpty || isPaddedWithNbsp(node))) {
+//           paddEmptyNode(settings, args, isBlock, node);
+//         }
+//       }
+//     } else if (node.type === 3) {
+//       // Removing trailing whitespace here, so that all whitespace in nodes to the right of us has already been fixed
+//       if (!hasWhitespaceParent(node)) {
+//         let text = node.value ?? '';
+//         if (node.next && isBlock(node.next) || isAtEdgeOfBlock(node, false)) {
+//           text = text.replace(endWhiteSpaceRegExp, '');
+//         }
+//
+//         if (text.length === 0) {
+//           node.remove();
+//         } else {
+//           node.value = text;
+//         }
+//       }
+//     }
+//   };
+//
+//   return [ preprocess, postprocess ];
+// };
 
 const getRootBlockName = (settings: DomParserSettings, args: ParserArgs) => {
   const name = args.forced_root_block ?? settings.forced_root_block;
@@ -274,9 +272,9 @@ const DomParser = (settings: DomParserSettings = {}, schema = Schema()): DomPars
 
   // Apply setting defaults
   const defaultedSettings = {
-    validate: true,
+    validate: false,
     root_name: 'body',
-    sanitize: true,
+    sanitize: false,
     ...settings
   };
 
@@ -292,7 +290,7 @@ const DomParser = (settings: DomParserSettings = {}, schema = Schema()): DomPars
     // If parsing XHTML then the content must contain the xmlns declaration, see https://www.w3.org/TR/xhtml1/normative.html#strict
     const wrappedHtml = format === 'xhtml' ? `<html xmlns="http://www.w3.org/1999/xhtml"><head></head><body>${content}</body></html>` : `<body>${content}</body>`;
     const body = parser.parseFromString(wrappedHtml, mimeType).body;
-    sanitizer.sanitizeHtmlElement(body, mimeType);
+   // sanitizer.sanitizeHtmlElement(body, mimeType);
     return isSpecialRoot ? body.firstChild as Element : body;
   };
 
@@ -362,11 +360,11 @@ const DomParser = (settings: DomParserSettings = {}, schema = Schema()): DomPars
    */
   const removeAttributeFilter = attributeFilterRegistry.removeFilter;
 
-  const findInvalidChildren = (node: AstNode, invalidChildren: AstNode[]): void => {
-    if (InvalidNodes.isInvalid(schema, node)) {
-      invalidChildren.push(node);
-    }
-  };
+  // const findInvalidChildren = (node: AstNode, invalidChildren: AstNode[]): void => {
+  //   if (InvalidNodes.isInvalid(schema, node)) {
+  //     invalidChildren.push(node);
+  //   }
+  // };
 
   const isWrappableNode = (blockElements: SchemaMap, node: AstNode) => {
     const isInternalElement = Type.isString(node.attr(internalElementAttr));
@@ -455,18 +453,18 @@ const DomParser = (settings: DomParserSettings = {}, schema = Schema()): DomPars
     element.innerHTML = '';
 
     // Set up whitespace fixes
-    const [ whitespacePre, whitespacePost ] = whitespaceCleaner(rootNode, schema, defaultedSettings, args);
+   // const [ whitespacePre, whitespacePost ] = whitespaceCleaner(rootNode, schema, defaultedSettings, args);
 
     // Find the invalid children in the tree
     const invalidChildren: AstNode[] = [];
-    const invalidFinder = validate ? (node: AstNode) => findInvalidChildren(node, invalidChildren) : Fun.noop;
+ //   const invalidFinder = validate ? (node: AstNode) => findInvalidChildren(node, invalidChildren) : Fun.noop;
 
     // Set up attribute and node matching
     const matches: FilterNode.FilterMatches = { nodes: {}, attributes: {}};
-    const matchFinder = (node: AstNode) => FilterNode.matchNode(getNodeFilters(), getAttributeFilters(), node, matches);
+ //   const matchFinder = (node: AstNode) => FilterNode.matchNode(getNodeFilters(), getAttributeFilters(), node, matches);
 
     // Walk the dom, apply all of the above things
-    walkTree(rootNode, [ whitespacePre, matchFinder ], [ whitespacePost, invalidFinder ]);
+    //walkTree(rootNode, [ whitespacePre, matchFinder ], [ whitespacePost, invalidFinder ]);
 
     // Because we collected invalid children while walking backwards, we need to reverse the list before operating on them
     invalidChildren.reverse();
@@ -474,11 +472,11 @@ const DomParser = (settings: DomParserSettings = {}, schema = Schema()): DomPars
     // Fix invalid children or report invalid children in a contextual parsing
     if (validate && invalidChildren.length > 0) {
       if (args.context) {
-        const { pass: topLevelChildren, fail: otherChildren } = Arr.partition(invalidChildren, (child) => child.parent === rootNode);
-        InvalidNodes.cleanInvalidNodes(otherChildren, schema, rootNode, matchFinder);
-        args.invalid = topLevelChildren.length > 0;
+      //  const { pass: topLevelChildren, fail: otherChildren } = Arr.partition(invalidChildren, (child) => child.parent === rootNode);
+      //  InvalidNodes.cleanInvalidNodes(otherChildren, schema, rootNode, matchFinder);
+      //  args.invalid = topLevelChildren.length > 0;
       } else {
-        InvalidNodes.cleanInvalidNodes(invalidChildren, schema, rootNode, matchFinder);
+       // InvalidNodes.cleanInvalidNodes(invalidChildren, schema, rootNode, matchFinder);
       }
     }
 
@@ -492,6 +490,8 @@ const DomParser = (settings: DomParserSettings = {}, schema = Schema()): DomPars
     if (!args.invalid) {
       FilterNode.runFilters(matches, args);
     }
+
+    console.log(rootNode);
 
     return rootNode;
   };
